@@ -1,0 +1,11 @@
+*.aux
+*.out
+*.log
+*.snm
+*.toc
+*.nav
+*.bbl
+*.blg
+main.dvi
+main.ps
+main.pdf
