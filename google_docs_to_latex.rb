@@ -35,32 +35,31 @@ def visit node
     order = $1.to_i
     header = clean(node.inner_text)
     if !header.empty?
-      puts "\\#{'sub' * (order - 1)}section{#{header.gsub(/^(\d|\.)*[[:space:]]*/, '').gsub(/[[:space:]]*$/, '')}}"
+      $out.puts "\\#{'sub' * (order - 1)}section{#{header.gsub(/^(\d|\.)*[[:space:]]*/, '').gsub(/[[:space:]]*$/, '')}}"
     end
   else
     if has_class(node, $emclass)
-      print '{\em '
+      $out.print '{\em '
     end
 
     if has_class(node, $ttclass)
-      print '{\tt '
+      $out.print '{\tt '
     end
 
     if has_class(node, $quoteclass)
-      print '\begin{quote}'
+      $out.print '\begin{quote}'
     end
 
     if node.name == 'p'
-      puts
-      puts
+      $out.puts
+      $out.puts
     elsif node.name == 'ul' || node.name == 'ol'
-      puts "\\begin{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
+      $out.puts "\\begin{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
       $listIDs << node['class'].gsub(/.*(lst-\S*).*/, '\1')
-      STDERR.puts $listIDs.last
     elsif node.name == 'li'
-      print '\item '
+      $out.print '\item '
     elsif node.name == 'img'
-      puts <<EOF
+      $out.puts <<EOF
 \\begin{figure}
 \\centering
 \\includegraphics[width=\\linewidth]{#{node['src']}}
@@ -70,7 +69,7 @@ def visit node
 EOF
       $nimages += 1
     elsif node.text?
-      print clean(node.text)
+      $out.print clean(node.text)
     end
 
     if !node.children.empty?
@@ -82,7 +81,7 @@ EOF
     end
 
     if node.name == 'li'
-      puts
+      $out.puts
 
       # if last and next ../next is list with same lst_ class but -1
       #   process it
@@ -105,20 +104,20 @@ EOF
         end
         node.next.remove
       end
-      puts "\\end{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
+      $out.puts "\\end{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
       $listIDs.pop
     end
 
     if has_class(node, $quoteclass)
-      print '\end{quote}'
+      $out.print '\end{quote}'
     end
 
     if has_class(node, $emclass)
-      print '}'
+      $out.print '}'
     end
 
     if has_class(node, $ttclass)
-      print '}'
+      $out.print '}'
     end
   end
 end
@@ -172,14 +171,17 @@ end
 $nimages = 0
 $listIDs = []
 
-puts IO.read('preamble.tex')
-puts '\begin{abstract}'
+$out = StringIO.new
+$out.puts IO.read('preamble.tex')
+$out.puts '\begin{abstract}'
 abstract.each do |node|
   visit node
 end
-puts '\end{abstract}'
+$out.puts '\end{abstract}'
 visit(doc)
 
-puts '\bibliographystyle{abbrv}'
-puts '\bibliography{references}'
-puts '\end{document}'
+$out.puts '\bibliographystyle{abbrv}'
+$out.puts '\bibliography{references}'
+$out.puts '\end{document}'
+
+puts $out.string
