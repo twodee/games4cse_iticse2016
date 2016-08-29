@@ -184,4 +184,7 @@ $out.puts '\bibliographystyle{abbrv}'
 $out.puts '\bibliography{references}'
 $out.puts '\end{document}'
 
-puts $out.string
+latex = $out.string
+latex.gsub!(/\s+(?=\\cite)/, '~')
+
+puts latex
