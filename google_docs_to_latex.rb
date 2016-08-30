@@ -22,8 +22,10 @@ def clean text
   cleaned
 end
 
-def has_class node, clazz
-  node.has_attribute?('class') && node['class'] =~ /\b#{clazz}\b/
+def has_class node, *clazzes
+  clazzes.any? do |clazz|
+    node.has_attribute?('class') && node['class'] =~ /\b#{clazz}\b/
+  end
 end
 
 def visit node
@@ -37,6 +39,21 @@ def visit node
     if !header.empty?
       $out.puts "\\#{'sub' * (order - 1)}section{#{header.gsub(/^(\d|\.)*[[:space:]]*/, '').gsub(/[[:space:]]*$/, '')}}"
     end
+
+  elsif node.name == 'table'
+    rows = node.xpath('.//tr') 
+    ncolumns = rows[0].children.length
+
+    $out.puts "\\begin{tabularx}{\\linewidth}{|#{'X|' * ncolumns}} \\hline"
+    rows.each do |row|
+      row.children.each_with_index do |child, index|
+        $out.puts '&' if index > 0
+        visit child
+      end
+      $out.puts '\\\\ \hline'
+    end
+    $out.puts "\\end{tabularx}"
+
   else
     if has_class(node, $emclass)
       $out.print '{\em '
@@ -46,7 +63,7 @@ def visit node
       $out.print '{\tt '
     end
 
-    if has_class(node, $quoteclass)
+    if node.name != 'li' && has_class(node, *$quote_classes)
       $out.print '\begin{quote}'
     end
 
@@ -88,7 +105,7 @@ EOF
       #   remove it
       nestedID = $listIDs.last.gsub(/(\d+)$/) { $1.to_i + 1 }
       if node == node.parent.last_element_child &&
-         (node.parent.next.name == 'ul' || node.parent.next.name == 'ol') &&
+         (node.parent.next_element.name == 'ul' || node.parent.next_element.name == 'ol') &&
          node.parent.next['class'] =~ /\b#{nestedID}\b/
         visit node.parent.next
         node.parent.next.remove
@@ -108,7 +125,7 @@ EOF
       $listIDs.pop
     end
 
-    if has_class(node, $quoteclass)
+    if node.name != 'li' && has_class(node, *$quote_classes)
       $out.print '\end{quote}'
     end
 
@@ -132,9 +149,27 @@ doc.xpath("//div[p/a[starts-with(@id, 'cmnt')]]").remove
 doc.xpath("//p[span[text()='References']]/following-sibling::p").remove
 doc.xpath("//p[span[text()='References']]").remove
 
+def collect_between(first, last)
+  result = []
+  until first == last
+    result << first
+    first = first.next
+  end
+  result
+end
+
 # Extract abstract.
-abstract = doc.xpath("//p[span[text()='Abstract']]/following-sibling::node()[following-sibling::p[span[starts-with(text(),'In some senses')]]]").remove
-doc.xpath("//p[span[text()='Abstract']]").remove
+# abstract = doc.xpath("//p[span[text()='Abstract']]/following-sibling::node()[following-sibling::p[span[ends-with(text(),'best computer games of all.')]]]").remove
+# doc.xpath("//p[span[text()='Abstract']]").remove
+
+abstract_node = doc.xpath("//p[span[text()='Abstract']]").first
+quote_node = doc.xpath("//p[span[starts-with(text(),'In some senses')]]").first
+abstract = collect_between(abstract_node, quote_node)
+
+abstract.each { |node| node.remove }
+# puts abstract
+
+# exit 1
 
 # Remove title.
 doc.xpath("//p[contains(concat(' ', normalize-space(@class), ' '), ' title ')]").remove
@@ -153,9 +188,13 @@ else
   raise 'No code class found!'
 end
 
-if css =~ /\.(c\d+)\{margin-left:36pt\}/
-  $quoteclass = $1
-else
+$quote_classes = []
+# css.scan(/\.(c\d+)\{[^}]*margin-left:36pt/) do
+css.scan(/\.(c\d+)\{margin-left:36pt\}/) do
+  $quote_classes << $1
+end
+
+if $quote_classes.empty?
   raise 'No quote class found!'
 end
 
@@ -174,11 +213,17 @@ $listIDs = []
 $out = StringIO.new
 $out.puts IO.read('preamble.tex')
 $out.puts '\begin{abstract}'
-abstract.each do |node|
-  visit node
-end
-$out.puts '\end{abstract}'
-visit(doc)
+# begin
+  abstract.each do |node|
+    visit node
+  end
+  $out.puts '\end{abstract}'
+
+  visit(doc)
+# rescue
+  # puts $out.string
+  # raise
+# end
 
 $out.puts '\bibliographystyle{abbrv}'
 $out.puts '\bibliography{references}'
