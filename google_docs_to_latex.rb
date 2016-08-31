@@ -29,54 +29,104 @@ def has_class node, *clazzes
 end
 
 def visit node
-  if has_class(node, $hideclass)
-    return
-  end
+  out = StringIO.new
 
-  if node.name =~ /^h([123])$/
+  if has_class(node, $hideclass)
+    # do nothing
+
+  elsif node.name =~ /^h([123])$/
     order = $1.to_i
     header = clean(node.inner_text)
     if !header.empty?
-      $out.puts "\\#{'sub' * (order - 1)}section{#{header.gsub(/^(\d|\.)*[[:space:]]*/, '').gsub(/[[:space:]]*$/, '')}}"
+      out.puts "\\#{'sub' * (order - 1)}section{#{header.gsub(/^(\d|\.)*[[:space:]]*/, '').gsub(/[[:space:]]*$/, '')}}"
     end
 
   elsif node.name == 'table'
     rows = node.xpath('.//tr') 
     ncolumns = rows[0].children.length
 
-    $out.puts "\\begin{tabularx}{\\linewidth}{|#{'X|' * ncolumns}} \\hline"
+    # find table marker
+    annotation = node.xpath("./preceding-sibling::p[span[starts-with(text(),'\\TABLE')]][1]").children[0].text
+    annotation =~ /\[(.*?),(.*?),(.*)\]/
+    label = $1
+    columns = $2
+    caption = $3
+
+    float = annotation =~ /TABLE\*/ ? 'table*' : 'table'
+
+    columns.gsub!(/(?=)/, '|')
+
+    out.puts "\\begin{#{float}}[tb]"
+    out.puts "\\begin{tabularx}{\\linewidth}{#{columns}} \\hline"
+    
+    rowspans = Hash.new
+
     rows.each do |row|
-      row.children.each_with_index do |child, index|
-        $out.puts '&' if index > 0
-        visit child
+      icolumn = 0
+      saw_rowspan = false
+      row.children.each do |child|
+
+        # Advance past any columns filled from above.
+        if rowspans.has_key?(icolumn) && rowspans[icolumn] > 0
+          while rowspans.has_key?(icolumn) && rowspans[icolumn] > 0
+            out.puts '&'
+            rowspans[icolumn] -= 1
+            if rowspans[icolumn] == 0
+              rowspans.delete(icolumn)
+            end
+            icolumn += 1
+          end
+        else
+          out.puts '&' if icolumn > 0
+        end
+
+        if child.has_attribute?('rowspan') && child['rowspan'].to_i > 1
+          saw_rowspan = true
+          out.print "\\multirow{#{child['rowspan']}}{*}{"
+          out.print visit(child).strip
+          out.puts "}"
+          rowspans[icolumn] = child['rowspan'].to_i - 1
+        else
+          out.print visit(child)
+        end
+
+        icolumn += 1
       end
-      $out.puts '\\\\ \hline'
+      out.print "\\\\ "
+      if rowspans.empty?
+        out.puts "\\hline"
+      else
+        out.puts "\\cline{2-3}"
+      end
     end
-    $out.puts "\\end{tabularx}"
+    out.puts "\\end{tabularx}"
+    out.puts "\\caption{#{caption}}"
+    out.puts "\\label{table:#{label}}"
+    out.puts "\\end{#{float}}"
 
   else
     if has_class(node, $emclass)
-      $out.print '{\em '
+      out.print '{\em '
     end
 
     if has_class(node, $ttclass)
-      $out.print '{\tt '
+      out.print '{\tt '
     end
 
     if node.name != 'li' && has_class(node, *$quote_classes)
-      $out.print '\begin{quote}'
+      out.puts '\begin{quote}'
     end
 
     if node.name == 'p'
-      $out.puts
-      $out.puts
+      out.puts
+      out.puts
     elsif node.name == 'ul' || node.name == 'ol'
-      $out.puts "\\begin{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
+      out.puts "\\begin{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
       $listIDs << node['class'].gsub(/.*(lst-\S*).*/, '\1')
     elsif node.name == 'li'
-      $out.print '\item '
+      out.print '\item '
     elsif node.name == 'img'
-      $out.puts <<EOF
+      out.puts <<EOF
 \\begin{figure}
 \\centering
 \\includegraphics[width=\\linewidth]{#{node['src']}}
@@ -86,19 +136,19 @@ def visit node
 EOF
       $nimages += 1
     elsif node.text?
-      $out.print clean(node.text)
+      out.print clean(node.text)
     end
 
     if !node.children.empty?
       child = node.children.first
       while child
-        visit child
+        out.print visit(child)
         child = child.next
       end
     end
 
     if node.name == 'li'
-      $out.puts
+      out.puts
 
       # if last and next ../next is list with same lst_ class but -1
       #   process it
@@ -107,7 +157,7 @@ EOF
       if node == node.parent.last_element_child &&
          (node.parent.next_element.name == 'ul' || node.parent.next_element.name == 'ol') &&
          node.parent.next['class'] =~ /\b#{nestedID}\b/
-        visit node.parent.next
+        out.print visit(node.parent.next)
         node.parent.next.remove
       end
     elsif node.name == 'ul' || node.name == 'ol'
@@ -117,26 +167,28 @@ EOF
       while (node.next.name == 'ol' || node.next.name == 'ul') &&
             node.next['class'] =~ /\b#{$listIDs.last}\b/
         node.next.children.each do |child|
-          visit child
+          out.print visit(child)
         end
         node.next.remove
       end
-      $out.puts "\\end{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
+      out.puts "\\end{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
       $listIDs.pop
     end
 
     if node.name != 'li' && has_class(node, *$quote_classes)
-      $out.print '\end{quote}'
+      out.puts '\end{quote}'
     end
 
     if has_class(node, $emclass)
-      $out.print '}'
+      out.print '}'
     end
 
     if has_class(node, $ttclass)
-      $out.print '}'
+      out.print '}'
     end
   end
+
+  out.string
 end
 
 doc = File.open(ARGV[0]) { |f| Nokogiri::HTML(f) }
@@ -210,26 +262,21 @@ end
 $nimages = 0
 $listIDs = []
 
-$out = StringIO.new
-$out.puts IO.read('preamble.tex')
-$out.puts '\begin{abstract}'
-# begin
-  abstract.each do |node|
-    visit node
-  end
-  $out.puts '\end{abstract}'
+out = StringIO.new
+out.puts IO.read('preamble.tex')
+out.puts '\begin{abstract}'
+abstract.each do |node|
+  out.print visit(node)
+end
+out.puts '\end{abstract}'
 
-  visit(doc)
-# rescue
-  # puts $out.string
-  # raise
-# end
+out.print visit(doc)
 
-$out.puts '\bibliographystyle{abbrv}'
-$out.puts '\bibliography{references}'
-$out.puts '\end{document}'
+out.puts '\bibliographystyle{abbrv}'
+out.puts '\bibliography{references}'
+out.puts '\end{document}'
 
-latex = $out.string
+latex = out.string
 latex.gsub!(/\s+(?=\\cite)/, '~')
 
 puts latex
