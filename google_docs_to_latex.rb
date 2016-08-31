@@ -50,7 +50,7 @@ def visit node
     annotation =~ /\[(.*?),(.*?),(.*)\]/
     label = $1
     columns = $2
-    caption = $3
+    caption = clean($3)
 
     float = annotation =~ /TABLE\*/ ? 'table*' : 'table'
 
@@ -126,12 +126,19 @@ def visit node
     elsif node.name == 'li'
       out.print '\item '
     elsif node.name == 'img'
+      annotation = node.xpath("../../preceding-sibling::p[span[starts-with(text(),'\\IMAGE')]][1]").children[0].text
+      STDERR.puts annotation
+      annotation =~ /\[(.*?),(.*)\]/
+      STDERR.puts $1
+      STDERR.puts $2
+      label = $1
+      caption = clean($2)
       out.puts <<EOF
-\\begin{figure}
+\\begin{figure}[tb]
 \\centering
 \\includegraphics[width=\\linewidth]{#{node['src']}}
-\\caption{An image}
-\\label{image#{$nimages}}
+\\caption{#{caption}}
+\\label{figure:#{label}}
 \\end{figure}
 EOF
       $nimages += 1
