@@ -3,11 +3,17 @@
 require 'nokogiri'
 
 def clean text
+  if text.nil?
+    return ''
+  end
+
   cleaned = text
+  cleaned.gsub!(/\u00f6/, '\\\\"{o}')
   cleaned.gsub!(/\u00a0/, ' ')
   cleaned.gsub!(/ {2,}/, ' ')
   cleaned.gsub!(/\u201c/, '``')
   cleaned.gsub!(/\u201d/, "''")
+  cleaned.gsub!(/-{3,}/, "---")
   cleaned.gsub!(/\s*\u2013\s*/, "---")
   cleaned.gsub!(/\u2018/, "`")
   cleaned.gsub!(/\u2019/, "'")
@@ -122,15 +128,18 @@ def visit node
       out.puts
     elsif node.name == 'ul' || node.name == 'ol'
       out.puts "\\begin{#{node.name == 'ul' ? 'itemize' : 'enumerate'}}"
+      if node.has_attribute?('start')
+        out.puts "\\setcounter{enumi}{#{node['start'].to_i - 1}}"
+      end
       $listIDs << node['class'].gsub(/.*(lst-\S*).*/, '\1')
     elsif node.name == 'li'
       out.print '\item '
     elsif node.name == 'img'
       annotation = node.xpath("../../preceding-sibling::p[span[starts-with(text(),'\\IMAGE')]][1]").children[0].text
-      STDERR.puts annotation
+      # STDERR.puts annotation
       annotation =~ /\[(.*?),(.*)\]/
-      STDERR.puts $1
-      STDERR.puts $2
+      # STDERR.puts $1
+      # STDERR.puts $2
       label = $1
       caption = clean($2)
       out.puts <<EOF
@@ -198,16 +207,6 @@ EOF
   out.string
 end
 
-doc = File.open(ARGV[0]) { |f| Nokogiri::HTML(f) }
-
-# Remove footnotes/comments.
-doc.xpath("//sup[a[starts-with(@id, 'cmnt_')]]").remove
-doc.xpath("//div[p/a[starts-with(@id, 'cmnt')]]").remove
-
-# Remove everything after references.
-doc.xpath("//p[span[text()='References']]/following-sibling::p").remove
-doc.xpath("//p[span[text()='References']]").remove
-
 def collect_between(first, last)
   result = []
   until first == last
@@ -217,13 +216,31 @@ def collect_between(first, last)
   result
 end
 
+doc = File.open(ARGV[0]) { |f| Nokogiri::HTML(f) }
+
+# Remove footnotes/comments.
+doc.xpath("//sup[a[starts-with(@id, 'cmnt_')]]").remove
+doc.xpath("//div[p/a[starts-with(@id, 'cmnt')]]").remove
+
+# Remove everything after references.
+refs = doc.xpath("//p[span[text()='References']]").first
+STDERR.puts refs
+end_node = doc.xpath("//p[span[starts-with(text(), '\\END')]]").first
+STDERR.puts end_node
+# doc.xpath("//p[span[text()='References']]").remove
+to_toss = collect_between(refs, end_node)
+to_toss.each do |node|
+  node.remove
+end
+end_node.remove
+
 # Extract abstract.
 # abstract = doc.xpath("//p[span[text()='Abstract']]/following-sibling::node()[following-sibling::p[span[ends-with(text(),'best computer games of all.')]]]").remove
-# doc.xpath("//p[span[text()='Abstract']]").remove
 
 abstract_node = doc.xpath("//p[span[text()='Abstract']]").first
-quote_node = doc.xpath("//p[span[starts-with(text(),'In some senses')]]").first
+quote_node = doc.xpath("//h1[span[starts-with(text(),'1. Introduction')]]").first
 abstract = collect_between(abstract_node, quote_node)
+# STDERR.puts abstract
 
 abstract.each { |node| node.remove }
 # puts abstract
@@ -270,18 +287,29 @@ $nimages = 0
 $listIDs = []
 
 out = StringIO.new
-out.puts IO.read('preamble.tex')
-out.puts '\begin{abstract}'
-abstract.each do |node|
-  out.print visit(node)
+begin
+  out.puts IO.read('preamble.tex')
+  out.puts '\begin{abstract}'
+  # STDERR.puts abstract
+  abstract.drop(1).each do |node|
+    out.print visit(node)
+  end
+  out.puts '\end{abstract}'
+
+  # STDERR.puts '---------------'
+  # STDERR.puts doc
+  # STDERR.puts '---------------'
+
+  out.print visit(doc)
+
+  out.puts '\bibliographystyle{abbrv}'
+  out.puts '\bibliography{references}'
+  out.puts '\end{document}'
+rescue NoMethodError => e
+  STDERR.puts out.string
+  raise
 end
-out.puts '\end{abstract}'
 
-out.print visit(doc)
-
-out.puts '\bibliographystyle{abbrv}'
-out.puts '\bibliography{references}'
-out.puts '\end{document}'
 
 latex = out.string
 latex.gsub!(/\s+(?=\\cite)/, '~')
